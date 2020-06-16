@@ -8,6 +8,10 @@ import argparse
 import requests
 import xml.etree.ElementTree
 import copy
+try:
+    from urlparse import urljoin  # Python2
+except ImportError:
+    from urllib.parse import urljoin  # Python3
 
 from termcolor import colored
 
@@ -221,7 +225,8 @@ class DashDownloader(HasLogger):
                 idx = idx + 1
 
         media_template = segment_template.attrib.get('media', '')
-        nex_time = 0
+        next_time = 0
+        number = 0
         for segment in segment_timeline.findall('mpd:S', ns):
             current_time = int(segment.attrib.get('t', '-1'))
             if current_time == -1:
@@ -229,10 +234,11 @@ class DashDownloader(HasLogger):
             else:
                 next_time = current_time
             next_time += int(segment.attrib.get('d', '0'))
-            self.download_template(media_template, rep, segment)
+            self.download_template(media_template, rep, segment, number)
+            number +=1
 
-    def download_template(self, template, representation=None, segment=None):
-        dest = self.render_template(template, representation, segment)
+    def download_template(self, template, representation=None, segment=None, segment_number=None):
+        dest = self.render_template(template, representation, segment, segment_number)
         dest_url = self.full_url(dest)
         self.info('requesting %s from %s' % (dest, dest_url))
         r = requests.get(dest_url)
@@ -242,25 +248,29 @@ class DashDownloader(HasLogger):
         else:
             self.error('cannot download %s server returned %d' % (dest_url, r.status_code))
 
-    def render_template(self, template, representation=None, segment=None):
+    def render_template(self, template, representation=None, segment=None, segment_number=None):
         template = template.replace('$RepresentationID$', '{representation_id}')
         template = template.replace('$Time$', '{time}')
+        template = template.replace('$Number$', '{number}')
 
         args = {}
         if representation is not None:
             args['representation_id'] = representation.attrib.get('id', '')
         if segment is not None:
             args['time'] = segment.attrib.get('t', '')
+        if segment_number is not None:
+            args['number'] = segment_number
 
         template = template.format(**args)
         return template
 
     def full_url(self, dest):
-        return self.mpd_base_url + dest # TODO remove hardcoded arrd
+        return urljoin(self.mpd_base_url, dest)
 
     def write(self, dest, content):
         dest = dest[0:dest.rfind('?')]
-        dest = os.path.join(self.proxy.output_dir, dest)
+        dest = os.path.normpath(os.path.abspath(self.proxy.output_dir) +  dest)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
         f = open(dest, 'wb')
         f.write(content)
         f.close()
